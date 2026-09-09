@@ -3,4 +3,5 @@ dist
 .vercel
 *.log
 *.db
+.env
 .DS_Store
