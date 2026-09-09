@@ -1,10 +1,14 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { db } from './db.js';
 import riskRoutes from './routes/risk.js';
 import locationRoutes from './routes/locations.js';
 
 const app = express();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const clientBuildPath = path.resolve(__dirname, '..', 'dist');
 const PORT = Number(process.env.PORT) || 5000;
 const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:5174')
   .split(',')
@@ -815,6 +819,13 @@ app.post('/api/monitor', (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// Serve the compiled React dashboard in production. API routes above remain
+// available under /api, while client-side routes fall back to index.html.
+app.use(express.static(clientBuildPath));
+app.get('/{*splat}', (_req, res) => {
+  res.sendFile(path.join(clientBuildPath, 'index.html'));
 });
 
 export { app };
