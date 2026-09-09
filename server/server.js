@@ -872,19 +872,29 @@ app.post('/api/monitor', (req, res) => {
   }
 });
 
-// Serve the compiled React dashboard in production. API routes above remain
-// available under /api, while client-side routes fall back to index.html.
+// Serve the compiled React dashboard in production.
+// Order matters and is intentional:
+//  1. /api/* routes are registered above and always take precedence.
+//  2. /assets/* serves real Vite files with correct MIME types. `fallthrough`
+//     stays enabled so a missing file is a clean 404, never an HTTP 500.
+//  3. Other static files from dist/ (favicon, etc.). index.html is never cached.
+//  4. Missing /assets/* files 404 as plain text — index.html is NEVER served
+//     for /assets/*, otherwise CSS/JS load as text/html and React goes blank.
+//  5. SPA fallback returns dist/index.html only for frontend GET routes.
 // NOTE: uses `app.use` fallback instead of `app.get('/{*splat}')` so it works
 // on both Express 4 and Express 5 (Render installs whatever package-lock resolves).
 const indexHtmlPath = path.join(clientBuildPath, 'index.html');
+const assetsPath = path.join(clientBuildPath, 'assets');
 if (!fs.existsSync(indexHtmlPath)) {
-  console.warn(`[LandslideSafe] dist not found at ${clientBuildPath}. Did the Render Build Command run "npm install && npm run build"?`);
+  console.warn(`[LandslideSafe] dist not found at ${clientBuildPath}. The Render Build Command MUST include "npm run build" so Vite generates dist/.`);
+} else {
+  const assetFiles = fs.existsSync(assetsPath) ? fs.readdirSync(assetsPath) : [];
+  console.log(`[LandslideSafe] Serving frontend from ${clientBuildPath} (${assetFiles.length} files in assets/).`);
 }
 // Hashed Vite assets (assets/index-[hash].js/css) are immutable across deploys.
 // index.html itself must NEVER be cached, otherwise browsers keep loading the
 // previous build's JS and new deploys appear as a stuck blank/old screen.
-app.use('/assets', express.static(path.join(clientBuildPath, 'assets'), {
-  fallthrough: false,
+app.use('/assets', express.static(assetsPath, {
   maxAge: '1y',
   immutable: true
 }));
@@ -894,8 +904,13 @@ app.use(express.static(clientBuildPath, {
     if (filePath.endsWith('index.html')) res.set('Cache-Control', 'no-store');
   }
 }));
+// Missing asset: explicit 404, never index.html (protects MIME types).
+app.use('/assets', (_req, res) => {
+  res.status(404).type('text/plain').send('Asset not found. Redeploy with a fresh "npm run build" so dist/ matches index.html.');
+});
 app.use((req, res, next) => {
   if (req.path.startsWith('/api')) return next();
+  if (req.path.startsWith('/assets')) return next();
   if (req.method !== 'GET') return next();
   res.set('Cache-Control', 'no-store');
   res.sendFile(indexHtmlPath);
