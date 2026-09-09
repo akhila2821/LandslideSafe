@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db } from './db.js';
@@ -10,16 +11,35 @@ const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientBuildPath = path.resolve(__dirname, '..', 'dist');
 const PORT = Number(process.env.PORT) || 5000;
-const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:5174')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+// On Render (single Web Service) the frontend and API share one origin, so the
+// browser sends Origin: https://<app>.onrender.com. If CORS_ORIGIN is not set,
+// allow all origins (same-service deploy). Set CORS_ORIGIN explicitly to lock down.
+const corsEnv = process.env.CORS_ORIGIN;
+const allowedOrigins = corsEnv
+  ? corsEnv.split(',').map((origin) => origin.trim()).filter(Boolean)
+  : null;
 const WEATHER_URL = process.env.VITE_WEATHER_URL || 'https://api.open-meteo.com/v1/forecast';
 const SENSOR_API_URL = process.env.VITE_SENSOR_API_URL || '';
 
+// Render uses an ephemeral filesystem: a fresh deploy has an empty SQLite file.
+// Auto-seed once so /api/locations, /api/hazard-zones etc. return demo data
+// instead of empty arrays (which looks like a broken/blank dashboard).
+try {
+  const locCount = db.prepare('SELECT COUNT(*) AS c FROM locations').get()?.c ?? 0;
+  if (locCount === 0) {
+    console.log('[LandslideSafe] Empty database detected, auto-seeding demo data...');
+    await import('./seed.js');
+    console.log('[LandslideSafe] Auto-seed complete.');
+  }
+} catch (seedErr) {
+  console.warn('[LandslideSafe] Auto-seed check failed:', seedErr.message);
+}
+
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+    // No Origin (curl, health checks) or no CORS_ORIGIN configured (Render
+    // single-service default) -> allow. Otherwise enforce the allow-list.
+    if (!origin || !allowedOrigins || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
     return callback(new Error('Origin is not allowed by LandslideSafe API CORS policy.'));
@@ -823,14 +843,22 @@ app.post('/api/monitor', (req, res) => {
 
 // Serve the compiled React dashboard in production. API routes above remain
 // available under /api, while client-side routes fall back to index.html.
+// NOTE: uses `app.use` fallback instead of `app.get('/{*splat}')` so it works
+// on both Express 4 and Express 5 (Render installs whatever package-lock resolves).
+const indexHtmlPath = path.join(clientBuildPath, 'index.html');
+if (!fs.existsSync(indexHtmlPath)) {
+  console.warn(`[LandslideSafe] dist not found at ${clientBuildPath}. Did the Render Build Command run "npm install && npm run build"?`);
+}
 app.use('/assets', express.static(path.join(clientBuildPath, 'assets'), {
   fallthrough: false,
   maxAge: '1y',
   immutable: true
 }));
 app.use(express.static(clientBuildPath));
-app.get('/{*splat}', (_req, res) => {
-  res.sendFile(path.join(clientBuildPath, 'index.html'));
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api')) return next();
+  if (req.method !== 'GET') return next();
+  res.sendFile(indexHtmlPath);
 });
 
 export { app };
