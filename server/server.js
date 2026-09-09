@@ -823,6 +823,11 @@ app.post('/api/monitor', (req, res) => {
 
 // Serve the compiled React dashboard in production. API routes above remain
 // available under /api, while client-side routes fall back to index.html.
+app.use('/assets', express.static(path.join(clientBuildPath, 'assets'), {
+  fallthrough: false,
+  maxAge: '1y',
+  immutable: true
+}));
 app.use(express.static(clientBuildPath));
 app.get('/{*splat}', (_req, res) => {
   res.sendFile(path.join(clientBuildPath, 'index.html'));
