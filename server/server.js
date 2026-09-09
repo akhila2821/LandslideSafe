@@ -11,13 +11,36 @@ const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientBuildPath = path.resolve(__dirname, '..', 'dist');
 const PORT = Number(process.env.PORT) || 5000;
-// On Render (single Web Service) the frontend and API share one origin, so the
-// browser sends Origin: https://<app>.onrender.com. If CORS_ORIGIN is not set,
-// allow all origins (same-service deploy). Set CORS_ORIGIN explicitly to lock down.
-const corsEnv = process.env.CORS_ORIGIN;
-const allowedOrigins = corsEnv
-  ? corsEnv.split(',').map((origin) => origin.trim()).filter(Boolean)
-  : null;
+// Browser-origin allow-list for the API:
+// - FRONTEND_URL: primary. Set this on Render to your site URL, e.g.
+//   https://landslide-zm5f.onrender.com (single Web Service serves the
+//   frontend and API from the same origin, so this is that URL).
+//   Accepts a single URL or a comma-separated list. No trailing slash needed.
+// - CORS_ORIGIN: legacy/extra origins, comma-separated, merged if present.
+// - Localhost dev origins are always allowed so `npm run dev` keeps working.
+// No wildcard is used: only listed origins (plus non-browser requests without
+// an Origin header, e.g. curl/health checks) are accepted.
+const localhostOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174'
+];
+const normalizeOrigin = (value) => String(value || '').trim().replace(/\/$/, '');
+const extraOrigins = [process.env.FRONTEND_URL, process.env.CORS_ORIGIN]
+  .filter(Boolean)
+  .flatMap((value) => String(value).split(','))
+  .map(normalizeOrigin)
+  .filter(Boolean);
+const allowedOrigins = [...new Set([...localhostOrigins, ...extraOrigins])];
+if (!process.env.FRONTEND_URL && !process.env.CORS_ORIGIN) {
+  console.warn(
+    '[LandslideSafe] FRONTEND_URL is not set. Browser calls from your deployed site will be rejected by CORS. ' +
+    'Set FRONTEND_URL to your Render site URL (e.g. https://landslide-zm5f.onrender.com).'
+  );
+} else {
+  console.log(`[LandslideSafe] CORS allow-list: ${allowedOrigins.join(', ')}`);
+}
 const WEATHER_URL = process.env.VITE_WEATHER_URL || 'https://api.open-meteo.com/v1/forecast';
 const SENSOR_API_URL = process.env.VITE_SENSOR_API_URL || '';
 
@@ -37,14 +60,22 @@ try {
 
 app.use(cors({
   origin(origin, callback) {
-    // No Origin (curl, health checks) or no CORS_ORIGIN configured (Render
-    // single-service default) -> allow. Otherwise enforce the allow-list.
-    if (!origin || !allowedOrigins || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+    // Non-browser requests (curl, Render health checks) carry no Origin.
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(normalizeOrigin(origin))) {
       return callback(null, true);
     }
     return callback(new Error('Origin is not allowed by LandslideSafe API CORS policy.'));
   }
 }));
+// CORS rejections become a JSON 403 (not Express's default HTML 500).
+// Existing API routes keep their own try/catch error responses.
+app.use((err, _req, res, next) => {
+  if (err && /not allowed by LandslideSafe API CORS policy/i.test(err.message || '')) {
+    return res.status(403).json({ success: false, error: err.message });
+  }
+  return next(err);
+});
 app.use(express.json({ limit: '15mb' }));
 
 app.get('/api/health', (_req, res) => {
