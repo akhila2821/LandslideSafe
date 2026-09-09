@@ -10,7 +10,20 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div id="boot-fallback" style="padding:32px;font-family:system-ui;color:#e5e7eb;background:#111827;min-height:100vh">Loading LandslideSafe dashboard…</div></div>
+    <script>
+      // Boot probe: turns a silent white screen into an actionable message.
+      window.addEventListener('error', function (e) {
+        var el = document.getElementById('boot-fallback');
+        if (el) el.innerHTML = 'Dashboard JS failed to start: ' + (e.message || 'unknown error') + '<br>Check /api/health and hard-refresh (Ctrl+Shift+R).';
+      });
+      setTimeout(function () {
+        var root = document.getElementById('root');
+        if (root && root.querySelector('#boot-fallback')) {
+          root.querySelector('#boot-fallback').innerHTML = 'Still loading after 10s — the app JS may be cached or failing.<br>Hard-refresh (Ctrl+Shift+R) and check /api/health.';
+        }
+      }, 10000);
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

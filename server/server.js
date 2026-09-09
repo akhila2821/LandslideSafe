@@ -849,15 +849,24 @@ const indexHtmlPath = path.join(clientBuildPath, 'index.html');
 if (!fs.existsSync(indexHtmlPath)) {
   console.warn(`[LandslideSafe] dist not found at ${clientBuildPath}. Did the Render Build Command run "npm install && npm run build"?`);
 }
+// Hashed Vite assets (assets/index-[hash].js/css) are immutable across deploys.
+// index.html itself must NEVER be cached, otherwise browsers keep loading the
+// previous build's JS and new deploys appear as a stuck blank/old screen.
 app.use('/assets', express.static(path.join(clientBuildPath, 'assets'), {
   fallthrough: false,
   maxAge: '1y',
   immutable: true
 }));
-app.use(express.static(clientBuildPath));
+app.use(express.static(clientBuildPath, {
+  maxAge: 0,
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('index.html')) res.set('Cache-Control', 'no-store');
+  }
+}));
 app.use((req, res, next) => {
   if (req.path.startsWith('/api')) return next();
   if (req.method !== 'GET') return next();
+  res.set('Cache-Control', 'no-store');
   res.sendFile(indexHtmlPath);
 });
 

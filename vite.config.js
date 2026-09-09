@@ -3,15 +3,7 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  // Stable filenames prevent a browser from requesting an old, hashed asset
-  // after Render replaces the previous production build.
-  build: {
-    rollupOptions: {
-      output: {
-        entryFileNames: 'assets/app.js',
-        chunkFileNames: 'assets/chunk-[name].js',
-        assetFileNames: (asset) => asset.name?.endsWith('.css') ? 'assets/app.css' : 'assets/[name][extname]'
-      }
-    }
-  }
+  // Default Vite hashed filenames (assets/index-[hash].js). index.html always
+  // points at the current build's files, so new Render deploys are picked up
+  // immediately and old files can be cached immutably without going stale.
 })
